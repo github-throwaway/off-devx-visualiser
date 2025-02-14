@@ -3,20 +3,20 @@ import functools
 import os
 import sys
 from collections import namedtuple
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from timeit import default_timer as timer  # For benchmarking.
 from typing import Callable
 
 import requests  # For GraphQL HTTP requests.
-from loguru import logger  # Using loguru for logging
-from tqdm import tqdm
+from loguru import logger  # For improved logging.
 
+# Removed: ThreadPoolExecutor and tqdm since processing is lightweight and sequential execution is sufficient.
 
-# Timeit decorator to log function execution time using loguru.
+# -----------------------------
+# Timeit decorator for performance logging.
+# -----------------------------
 def timeit(func: Callable) -> Callable:
-    """Decorator to log function execution time."""
-
+    """Decorator to log function execution time using loguru."""
     @functools.wraps(func)
     def wrapped(*args, **kwargs):
         start = timer()
@@ -24,14 +24,16 @@ def timeit(func: Callable) -> Callable:
         duration = timer() - start
         logger.debug(f"'{func.__name__}' executed in {duration:.3f}s")
         return result
-
     return wrapped
 
-
-# Define a named tuple for repository info.
+# -----------------------------
+# Define a named tuple for repository information.
+# -----------------------------
 RepoInfo = namedtuple("RepoInfo", ["sort_key", "row", "is_active", "repo_name", "repo_data"])
 
-
+# -----------------------------
+# Process a repository's data into an HTML table row.
+# -----------------------------
 def process_repo(repo_data, stale_threshold):
     """
     Process a repository dictionary from the GraphQL API and generate an HTML table row.
@@ -83,7 +85,9 @@ def process_repo(repo_data, stale_threshold):
     sort_key = last_commit if last_commit else datetime(1970, 1, 1, tzinfo=timezone.utc)
     return RepoInfo(sort_key, row, is_active, name, repo_data)
 
-
+# -----------------------------
+# Fetch repositories using GitHub's GraphQL API.
+# -----------------------------
 def fetch_repositories(org_name, token):
     """
     Fetch repository metrics for the given organization using GitHub's GraphQL API.
@@ -124,13 +128,16 @@ def fetch_repositories(org_name, token):
     repos = result["data"]["organization"]["repositories"]["nodes"]
     return repos
 
-
+# -----------------------------
+# Main function to generate the dashboard.
+# -----------------------------
 @timeit
 def main():
     """
     Main function to generate the repository dashboard HTML using GraphQL.
+    Designed to work as a GitHub Action.
     """
-    # For GitHub Actions, inputs are provided as environment variables prefixed with INPUT_
+    # For GitHub Actions, inputs are provided as environment variables prefixed with INPUT_.
     token = os.environ.get("INPUT_GITHUB_TOKEN") or os.environ.get("GITHUB_TOKEN") or "your_graphql_token_here"
     org_name = os.environ.get("INPUT_ORG_NAME") or os.environ.get("ORG_NAME") or "openfoodfacts"
     if not token or not org_name:
@@ -155,13 +162,10 @@ def main():
     )
     footer = "</tbody></table>"
 
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        repo_infos = list(tqdm(
-            executor.map(lambda repo: process_repo(repo, stale_threshold), repos_data),
-            total=len(repos_data),
-            desc="Processing repositories"
-        ))
+    # Process repositories sequentially.
+    repo_infos = [process_repo(repo, stale_threshold) for repo in repos_data]
 
+    # Sort repositories by last commit (most recent first).
     repo_infos_sorted = sorted(repo_infos, key=lambda info: info.sort_key, reverse=True)
     table_rows = "\n".join([info.row for info in repo_infos_sorted])
     html_table = header + table_rows + footer
@@ -186,7 +190,6 @@ def main():
     except Exception as e:
         logger.error(f"Error writing index.html: {e}")
         sys.exit(1)
-
 
 if __name__ == "__main__":
     main()
