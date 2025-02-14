@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Repository Dashboard</title>
+  <!-- jQuery -->
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <!-- DataTables CSS and JS -->
+  <link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/1.13.4/css/jquery.dataTables.min.css"/>
+  <script type="text/javascript" src="https://cdn.datatables.net/1.13.4/js/jquery.dataTables.min.js"></script>
+  <style>
+    /* Global link styling: remove underlines and default blue color */
+    a {
+      text-decoration: none;
+      color: inherit;
+    }
+    /* Style for the stale tag */
+    .stale {
+      color: red;
+      font-weight: bold;
+    }
+    /* Basic styling for the dashboard */
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+    }
+    /* Style for the last updated information */
+    #lastUpdated {
+      font-size: 0.9em;
+      color: #555;
+      margin-bottom: 10px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Repository Dashboard</h1>
+  <!-- Display last updated timestamp -->
+  <p id="lastUpdated">Last updated: {{LAST_UPDATED}}</p>
+  {{TABLE_CONTENT}}
+
+  <script>
+    $(document).ready(function(){
+      // Initialize DataTables with pagination disabled.
+      $('#repoTable').DataTable({ paging: false });
+    });
+  </script>
+</body>
+</html>
