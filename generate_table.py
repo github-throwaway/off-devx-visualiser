@@ -10,8 +10,6 @@ from typing import Callable
 import requests  # For GraphQL HTTP requests.
 from loguru import logger  # For improved logging.
 
-# Removed: ThreadPoolExecutor and tqdm since processing is lightweight and sequential execution is sufficient.
-
 # -----------------------------
 # Timeit decorator for performance logging.
 # -----------------------------
@@ -86,47 +84,98 @@ def process_repo(repo_data, stale_threshold):
     return RepoInfo(sort_key, row, is_active, name, repo_data)
 
 # -----------------------------
-# Fetch repositories using GitHub's GraphQL API.
+# Fetch repositories using GitHub's GraphQL API with pagination.
 # -----------------------------
 def fetch_repositories(org_name, token):
     """
     Fetch repository metrics for the given organization using GitHub's GraphQL API.
-    Assumes fewer than 100 repositories.
+    Now supports pagination to retrieve all repositories.
     """
     query = """
-    query ($orgName: String!) {
+    query ($orgName: String!, $cursor: String) {
       organization(login: $orgName) {
-        repositories(first: 100, orderBy: {field: PUSHED_AT, direction: DESC}) {
+        repositories(first: 50, after: $cursor, orderBy: {field: PUSHED_AT, direction: DESC}) {
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
           nodes {
             name
             url
             pushedAt
             isArchived
-            issues(states: OPEN) {
+            issues(states: OPEN, first: 100) {
               totalCount
+              nodes {
+                author {
+                  login
+                }
+              }
             }
-            pullRequests(states: OPEN) {
+            pullRequests(states: OPEN, first: 100) {
               totalCount
+              nodes {
+                author {
+                  login
+                }
+              }
             }
           }
         }
       }
     }
     """
-    variables = {"orgName": org_name}
     headers = {"Authorization": f"Bearer {token}"}
-    response = requests.post("https://api.github.com/graphql",
-                             json={"query": query, "variables": variables},
-                             headers=headers)
-    if response.status_code != 200:
-        logger.error(f"GraphQL query failed with status {response.status_code}: {response.text}")
-        sys.exit(1)
-    result = response.json()
-    if "errors" in result:
-        logger.error(f"GraphQL errors: {result['errors']}")
-        sys.exit(1)
-    repos = result["data"]["organization"]["repositories"]["nodes"]
+    repos = []
+    cursor = None
+    while True:
+        variables = {"orgName": org_name, "cursor": cursor}
+        response = requests.post("https://api.github.com/graphql",
+                                 json={"query": query, "variables": variables},
+                                 headers=headers)
+        if response.status_code != 200:
+            logger.error(f"GraphQL query failed with status {response.status_code}: {response.text}")
+            sys.exit(1)
+        result = response.json()
+        if "errors" in result:
+            logger.error(f"GraphQL errors: {result['errors']}")
+            sys.exit(1)
+        data = result["data"]["organization"]["repositories"]
+        repos.extend(data["nodes"])
+        if data["pageInfo"]["hasNextPage"]:
+            cursor = data["pageInfo"]["endCursor"]
+        else:
+            break
     return repos
+
+# -----------------------------
+# Generate contributor table HTML from aggregated data.
+# -----------------------------
+def generate_contrib_table(contrib_data):
+    """
+    Generate an HTML table for contributors sorted by the number of open issues.
+    """
+    header = (
+        "<table id='contribTable' class='display' style='width:100%'>"
+        "<thead>"
+        "<tr>"
+        "<th>Contributor</th>"
+        "<th>Open Issues</th>"
+        "<th>Open PRs</th>"
+        "</tr>"
+        "</thead>"
+        "<tbody>"
+    )
+    rows = ""
+    # Sort contributors by open issues (and then by PRs) in descending order.
+    sorted_contribs = sorted(contrib_data.items(), key=lambda x: (x[1]["issues"], x[1]["prs"]), reverse=True)
+    for login, counts in sorted_contribs:
+        issues_link = f"<a href='https://github.com/search?q=type:issue+author:{login}+is:open' target='_blank'>{counts['issues']}</a>"
+        prs_link = f"<a href='https://github.com/search?q=type:pr+author:{login}+is:open' target='_blank'>{counts['prs']}</a>"
+        row = f"<tr><td>{login}</td><td>{issues_link}</td><td>{prs_link}</td></tr>"
+        rows += row + "\n"
+    footer = "</tbody></table>"
+    return header + rows + footer
 
 # -----------------------------
 # Main function to generate the dashboard.
@@ -147,6 +196,7 @@ def main():
     repos_data = fetch_repositories(org_name, token)
     stale_threshold = datetime.now(timezone.utc) - timedelta(days=365)
 
+    # Build repository table.
     header = (
         "<table id='repoTable' class='display' style='width:100%'>"
         "<thead>"
@@ -162,14 +212,29 @@ def main():
     )
     footer = "</tbody></table>"
 
-    # Process repositories sequentially.
     repo_infos = [process_repo(repo, stale_threshold) for repo in repos_data]
-
-    # Sort repositories by last commit (most recent first).
     repo_infos_sorted = sorted(repo_infos, key=lambda info: info.sort_key, reverse=True)
     table_rows = "\n".join([info.row for info in repo_infos_sorted])
     html_table = header + table_rows + footer
     logger.info("Repositories sorted.")
+
+    # Aggregate contributor data.
+    contrib_data = {}
+    for repo in repos_data:
+        # Aggregate open issues.
+        for issue in repo['issues'].get('nodes', []):
+            if issue and issue.get('author') and issue['author'] and 'login' in issue['author']:
+                login = issue['author']['login']
+                contrib_data.setdefault(login, {"issues": 0, "prs": 0})
+                contrib_data[login]["issues"] += 1
+        # Aggregate open pull requests.
+        for pr in repo['pullRequests'].get('nodes', []):
+            if pr and pr.get('author') and pr['author'] and 'login' in pr['author']:
+                login = pr['author']['login']
+                contrib_data.setdefault(login, {"issues": 0, "prs": 0})
+                contrib_data[login]["prs"] += 1
+
+    contrib_table = generate_contrib_table(contrib_data)
 
     try:
         with open("template.html", "r", encoding="utf-8") as f:
@@ -180,7 +245,8 @@ def main():
         sys.exit(1)
 
     last_updated = datetime.now(timezone.utc).astimezone().strftime("%m/%d/%Y at %I:%M:%S %p")
-    output_html = template.replace("{{TABLE_CONTENT}}", html_table)
+    output_html = template.replace("{{REPO_TABLE}}", html_table)
+    output_html = output_html.replace("{{CONTRIB_TABLE}}", contrib_table)
     output_html = output_html.replace("{{LAST_UPDATED}}", last_updated)
 
     try:
