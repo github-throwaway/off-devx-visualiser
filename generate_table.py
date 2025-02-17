@@ -4,19 +4,16 @@ import os
 import sys
 from collections import namedtuple
 from datetime import datetime, timedelta, timezone
-from timeit import default_timer as timer  # For benchmarking.
+from timeit import default_timer as timer
 from typing import Callable
 
-import requests  # For GraphQL HTTP requests.
-from loguru import logger  # For improved logging.
+import requests
+from loguru import logger
 
-# Removed: ThreadPoolExecutor and tqdm since processing is lightweight and sequential execution is sufficient.
 
-# -----------------------------
-# Timeit decorator for performance logging.
-# -----------------------------
 def timeit(func: Callable) -> Callable:
     """Decorator to log function execution time using loguru."""
+
     @functools.wraps(func)
     def wrapped(*args, **kwargs):
         start = timer()
@@ -24,16 +21,13 @@ def timeit(func: Callable) -> Callable:
         duration = timer() - start
         logger.debug(f"'{func.__name__}' executed in {duration:.3f}s")
         return result
+
     return wrapped
 
-# -----------------------------
-# Define a named tuple for repository information.
-# -----------------------------
+
 RepoInfo = namedtuple("RepoInfo", ["sort_key", "row", "is_active", "repo_name", "repo_data"])
 
-# -----------------------------
-# Process a repository's data into an HTML table row.
-# -----------------------------
+
 def process_repo(repo_data, stale_threshold):
     """
     Process a repository dictionary from the GraphQL API and generate an HTML table row.
@@ -85,18 +79,61 @@ def process_repo(repo_data, stale_threshold):
     sort_key = last_commit if last_commit else datetime(1970, 1, 1, tzinfo=timezone.utc)
     return RepoInfo(sort_key, row, is_active, name, repo_data)
 
-# -----------------------------
-# Fetch repositories using GitHub's GraphQL API.
-# -----------------------------
-def fetch_repositories(org_name, token):
+
+def fetch_contributors(org_name, token):
     """
-    Fetch repository metrics for the given organization using GitHub's GraphQL API.
-    Assumes fewer than 100 repositories.
+    Fetch contributors sorted by the number of open issues they created.
     """
     query = """
     query ($orgName: String!) {
       organization(login: $orgName) {
-        repositories(first: 100, orderBy: {field: PUSHED_AT, direction: DESC}) {
+        repositories(first: 100) {
+          nodes {
+            name
+            issues(first: 100) {
+              nodes {
+                author {
+                  login
+                }
+                state
+              }
+            }
+          }
+        }
+      }
+    }
+    """
+
+    headers = {"Authorization": f"Bearer {token}"}
+    response = requests.post("https://api.github.com/graphql",
+                             json={"query": query, "variables": {"orgName": org_name}},
+                             headers=headers)
+    if response.status_code != 200:
+        logger.error(f"GraphQL query failed with status {response.status_code}: {response.text}")
+        sys.exit(1)
+
+    data = response.json()["data"]["organization"]["repositories"]["nodes"]
+
+    contributor_count = {}
+    for repo in data:
+        for issue in repo["issues"]["nodes"]:
+            author = issue["author"]["login"]
+            contributor_count[author] = contributor_count.get(author, 0) + 1
+
+    sorted_contributors = sorted(contributor_count.items(), key=lambda x: x[1], reverse=True)
+    contributor_rows = "\n".join(f"<tr><td>{user}</td><td>{count}</td></tr>" for user, count in sorted_contributors)
+
+    return f"<table><tr><th>User</th><th>Open Issues Created</th></tr>{contributor_rows}</table>"
+
+
+def fetch_repositories(org_name, token):
+    """
+    Fetch all repository metrics for the given organization using GitHub's GraphQL API with pagination.
+    """
+    query = """
+    query ($orgName: String!, $afterCursor: String) {
+      organization(login: $orgName) {
+        repositories(first: 100, orderBy: {field: PUSHED_AT, direction: DESC}, after: $afterCursor) {
           nodes {
             name
             url
@@ -109,28 +146,43 @@ def fetch_repositories(org_name, token):
               totalCount
             }
           }
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
         }
       }
     }
     """
-    variables = {"orgName": org_name}
-    headers = {"Authorization": f"Bearer {token}"}
-    response = requests.post("https://api.github.com/graphql",
-                             json={"query": query, "variables": variables},
-                             headers=headers)
-    if response.status_code != 200:
-        logger.error(f"GraphQL query failed with status {response.status_code}: {response.text}")
-        sys.exit(1)
-    result = response.json()
-    if "errors" in result:
-        logger.error(f"GraphQL errors: {result['errors']}")
-        sys.exit(1)
-    repos = result["data"]["organization"]["repositories"]["nodes"]
-    return repos
 
-# -----------------------------
-# Main function to generate the dashboard.
-# -----------------------------
+    headers = {"Authorization": f"Bearer {token}"}
+    variables = {"orgName": org_name, "afterCursor": None}
+    all_repos = []
+
+    while True:
+        response = requests.post("https://api.github.com/graphql",
+                                 json={"query": query, "variables": variables},
+                                 headers=headers)
+        if response.status_code != 200:
+            logger.error(f"GraphQL query failed with status {response.status_code}: {response.text}")
+            sys.exit(1)
+
+        result = response.json()
+        if "errors" in result:
+            logger.error(f"GraphQL errors: {result['errors']}")
+            sys.exit(1)
+
+        data = result["data"]["organization"]["repositories"]
+        all_repos.extend(data["nodes"])
+
+        # Check if more pages exist
+        if not data["pageInfo"]["hasNextPage"]:
+            break
+        variables["afterCursor"] = data["pageInfo"]["endCursor"]
+
+    return all_repos
+
+
 @timeit
 def main():
     """
@@ -181,6 +233,7 @@ def main():
 
     last_updated = datetime.now(timezone.utc).astimezone().strftime("%m/%d/%Y at %I:%M:%S %p")
     output_html = template.replace("{{TABLE_CONTENT}}", html_table)
+    output_html = output_html.replace("{{CONTRIBUTOR_TABLE}}", fetch_contributors(org_name, token))
     output_html = output_html.replace("{{LAST_UPDATED}}", last_updated)
 
     try:
@@ -190,6 +243,7 @@ def main():
     except Exception as e:
         logger.error(f"Error writing index.html: {e}")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
