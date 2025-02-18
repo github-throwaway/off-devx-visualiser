@@ -1,105 +1,126 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="UTF-8">
-  <title>Repository Dashboard</title>
-  <!-- jQuery -->
-  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-  <!-- DataTables CSS and JS -->
-  <link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/1.13.4/css/jquery.dataTables.min.css"/>
-  <script type="text/javascript" src="https://cdn.datatables.net/1.13.4/js/jquery.dataTables.min.js"></script>
-  <style>
-    /* Global link styling: remove underlines and default blue color */
-    a {
-      text-decoration: none;
-      color: inherit;
-    }
-    /* Style for the stale tag */
-    .stale {
-      color: red;
-      font-weight: bold;
-    }
-    /* Basic styling for the dashboard */
-    body {
-      font-family: Arial, sans-serif;
-      margin: 20px;
-    }
-    /* Style for the last updated information */
-    #lastUpdated {
-      font-size: 0.9em;
-      color: #555;
-      margin-bottom: 10px;
-    }
-    /* Tabs styling */
-    .tab {
-      overflow: hidden;
-      border-bottom: 1px solid #ccc;
-      margin-bottom: 10px;
-    }
-    .tab button {
-      background-color: inherit;
-      border: none;
-      outline: none;
-      cursor: pointer;
-      padding: 14px 16px;
-      transition: 0.3s;
-    }
-    .tab button:hover {
-      background-color: #ddd;
-    }
-    .tab button.active {
-      background-color: #ccc;
-    }
-    .tabcontent {
-      display: none;
-      padding: 6px 12px;
-      border-top: none;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <title>Repository Dashboard</title>
+    <!-- jQuery -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <!-- DataTables CSS and JS -->
+    <link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/1.13.4/css/jquery.dataTables.min.css"/>
+    <script type="text/javascript" src="https://cdn.datatables.net/1.13.4/js/jquery.dataTables.min.js"></script>
+    <style>
+        /* Global link styling: remove underlines and default blue color */
+        a {
+            text-decoration: none;
+            color: inherit;
+        }
+
+        /* Style for the stale tag */
+        .stale {
+            color: red;
+            font-weight: bold;
+        }
+
+        /* Basic styling for the dashboard */
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+
+        /* Style for the last updated information */
+        #lastUpdated {
+            font-size: 0.9em;
+            color: #555;
+            margin-bottom: 10px;
+        }
+
+        /* Tabs styling */
+        .tab {
+            overflow: hidden;
+            border-bottom: 1px solid #ccc;
+            margin-bottom: 10px;
+        }
+
+        .tab button {
+            background-color: inherit;
+            border: none;
+            outline: none;
+            cursor: pointer;
+            padding: 14px 16px;
+            transition: 0.3s;
+        }
+
+        .tab button:hover {
+            background-color: #ddd;
+        }
+
+        .tab button.active {
+            background-color: #ccc;
+        }
+
+        .tabcontent {
+            display: none;
+            padding: 6px 12px;
+            border-top: none;
+        }
+    </style>
 </head>
 <body>
-  <h1>Repository Dashboard</h1>
-  <!-- Display the last updated timestamp -->
-  <p id="lastUpdated">Last updated (UTC): {{LAST_UPDATED}}</p>
+<h1>Repository Dashboard</h1>
+<!-- Display the last updated timestamp -->
+<p id="lastUpdated">Last updated (UTC): {{LAST_UPDATED}}</p>
 
-  <div class="tab">
+<div class="tab">
     <button class="tablinks active" onclick="openTab(event, 'Repositories')">Repositories</button>
     <button class="tablinks" onclick="openTab(event, 'Contributors')">Contributors</button>
-  </div>
+</div>
 
-  <div id="Repositories" class="tabcontent" style="display:block;">
+<div id="Repositories" class="tabcontent" style="display:block;">
     {{REPO_TABLE}}
-  </div>
+</div>
 
-  <div id="Contributors" class="tabcontent">
+<div id="Contributors" class="tabcontent">
     {{CONTRIB_TABLE}}
-  </div>
+</div>
 
-  <script>
-    $(document).ready(function(){
-      $('#repoTable').DataTable({
-        paging: false,
-        order: [[3, "desc"]]  // Column 3 (Last Commit) sorted descending
-      });
-      $('#contribTable').DataTable({
-        paging: false,
-        order: [[1, "desc"]]  // Column 1 (Open Issues) sorted descending
-      });
+<script>
+    $(document).ready(function () {
+        $('#repoTable').DataTable({
+            paging: false,
+            order: [[3, "desc"]],  // Order by "Last Commit" descending
+            columns: [
+                null,                    // Repository: default text type
+                {type: "num-fmt"},       // Open Issues: numeric formatted
+                {type: "num-fmt"},       // Open PRs: numeric formatted
+                {type: "date"},          // Last Commit: date
+                null                     // Status: default text type
+            ]
+        });
+        $('#contribTable').DataTable({
+            paging: false,
+            order: [[1, "desc"]],  // Order by "Open Issues" descending
+            columns: [
+                null,                    // Contributor: default text type
+                {type: "num-fmt"},       // Open Issues: numeric formatted
+                {type: "num-fmt"}        // Open PRs: numeric formatted
+            ]
+        });
     });
 
     function openTab(evt, tabName) {
-      var i, tabcontent, tablinks;
-      tabcontent = document.getElementsByClassName("tabcontent");
-      for (i = 0; i < tabcontent.length; i++) {
-        tabcontent[i].style.display = "none";
-      }
-      tablinks = document.getElementsByClassName("tablinks");
-      for (i = 0; i < tablinks.length; i++) {
-        tablinks[i].className = tablinks[i].className.replace(" active", "");
-      }
-      document.getElementById(tabName).style.display = "block";
-      evt.currentTarget.className += " active";
+        var i, tabcontent, tablinks;
+        tabcontent = document.getElementsByClassName("tabcontent");
+        for (i = 0; i < tabcontent.length; i++) {
+            tabcontent[i].style.display = "none";
+        }
+        tablinks = document.getElementsByClassName("tablinks");
+        for (i = 0; i < tablinks.length; i++) {
+            tablinks[i].className = tablinks[i].className.replace(" active", "");
+        }
+        document.getElementById(tabName).style.display = "block";
+        evt.currentTarget.className += " active";
     }
-  </script>
+</script>
+
 </body>
 </html>
