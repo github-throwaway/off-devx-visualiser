@@ -339,7 +339,7 @@ def generate_contrib_table(contrib_data: Dict[str, Dict[str, int]], org_name: st
         # Include data-order to use raw numeric values for sorting.
         row: str = (
             f"<tr>"
-            f"<td data-order='{login}>{author_link}</td>"
+            f"<td>{author_link}</td>"
             f"<td data-order='{counts['issues']}'>{issues_link}</td>"
             f"<td data-order='{counts['prs']}'>{prs_link}</td>"
             f"</tr>"
