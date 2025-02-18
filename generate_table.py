@@ -335,10 +335,11 @@ def generate_contrib_table(contrib_data: Dict[str, Dict[str, int]], org_name: st
             f"<a href='https://github.com/search?q=type:pr+author:{login}+is:open+org:{org_name}' "
             f"target='_blank'>{counts['prs']}</a>"
         )
+        author_link:str = f"<a href='https://github.com/{login}' target='_blank'>👤 {login}</a>"
         # Include data-order to use raw numeric values for sorting.
         row: str = (
             f"<tr>"
-            f"<td data-order='{login}>👤 {login}</td>"
+            f"<td data-order='{login}>{author_link}</td>"
             f"<td data-order='{counts['issues']}'>{issues_link}</td>"
             f"<td data-order='{counts['prs']}'>{prs_link}</td>"
             f"</tr>"
