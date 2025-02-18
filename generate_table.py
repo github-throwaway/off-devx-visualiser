@@ -170,9 +170,12 @@ def process_repo(repo_data: Dict[str, Any], stale_threshold: datetime) -> RepoIn
     if pushed_at_str:
         last_commit = datetime.strptime(pushed_at_str, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
         last_commit_str: str = last_commit.strftime("%Y-%m-%d %H:%M:%S")
+        last_commit_order: float = last_commit.timestamp()  # For sorting as a number
     else:
         last_commit = None
         last_commit_str = "N/A"
+        last_commit_order = 0
+
     issues_total: int = repo_data.get("issues", {}).get("totalCount", 0)
     pr_total: int = repo_data.get("pullRequests", {}).get("totalCount", 0)
 
@@ -193,12 +196,14 @@ def process_repo(repo_data: Dict[str, Any], stale_threshold: datetime) -> RepoIn
     pr_link: str = f"<a href='{html_url}/pulls' target='_blank'>{pr_total}</a>"
     commit_link: str = f"<a href='{html_url}/commits' target='_blank'>{last_commit_str}</a>"
     active_class: str = " class='active-row'" if is_active else ""
+
+    # data-order attributes provide the raw numeric values for sorting.
     row: str = (
         f"<tr{active_class} data-repo='{name}'>"
         f"<td>{repo_link}</td>"
-        f"<td>{issues_link}</td>"
-        f"<td>{pr_link}</td>"
-        f"<td>{commit_link}</td>"
+        f"<td data-order='{issues_total}'>{issues_link}</td>"
+        f"<td data-order='{pr_total}'>{pr_link}</td>"
+        f"<td data-order='{last_commit_order}'>{commit_link}</td>"
         f"<td>{status_str}</td>"
         f"</tr>"
     )
@@ -310,7 +315,7 @@ def generate_contrib_table(contrib_data: Dict[str, Dict[str, int]], org_name: st
         "<table id='contribTable' class='display' style='width:100%'>"
         "<thead>"
         "<tr>"
-        "<th>Contributor 🧑‍💻</th>"  # Added emoji for the contributor header.
+        "<th>Contributor</th>"
         "<th>Open Issues</th>"
         "<th>Open PRs</th>"
         "</tr>"
@@ -328,9 +333,16 @@ def generate_contrib_table(contrib_data: Dict[str, Dict[str, int]], org_name: st
         )
         prs_link: str = (
             f"<a href='https://github.com/search?q=type:pr+author:{login}+is:open+org:{org_name}' "
-            f"target='_blank'>  {counts['prs']}</a>"
+            f"target='_blank'>{counts['prs']}</a>"
         )
-        row: str = f"<tr><td>👤 {login}</td><td>{issues_link}</td><td>{prs_link}</td></tr>"
+        # Include data-order to use raw numeric values for sorting.
+        row: str = (
+            f"<tr>"
+            f"<td>{login}</td>"
+            f"<td data-order='{counts['issues']}'>{issues_link}</td>"
+            f"<td data-order='{counts['prs']}'>{prs_link}</td>"
+            f"</tr>"
+        )
         rows.append(row)
     footer: str = "</tbody></table>"
     return header + "\n".join(rows) + footer
