@@ -190,7 +190,7 @@ def process_repo(repo_data: Dict[str, Any], stale_threshold: datetime) -> RepoIn
 
     repo_link: str = f"<a href='{html_url}' target='_blank'>📁 {name}</a>"
     issues_link: str = f"<a href='{html_url}/issues' target='_blank'>{issues_total}</a>"
-    pr_link: str = f"<a href='{html_url}/pulls' target='_blank'>🔀 {pr_total}</a>"
+    pr_link: str = f"<a href='{html_url}/pulls' target='_blank'>{pr_total}</a>"
     commit_link: str = f"<a href='{html_url}/commits' target='_blank'>{last_commit_str}</a>"
     active_class: str = " class='active-row'" if is_active else ""
     row: str = (
@@ -328,7 +328,7 @@ def generate_contrib_table(contrib_data: Dict[str, Dict[str, int]], org_name: st
         )
         prs_link: str = (
             f"<a href='https://github.com/search?q=type:pr+author:{login}+is:open+org:{org_name}' "
-            f"target='_blank'>🔀 {counts['prs']}</a>"
+            f"target='_blank'>  {counts['prs']}</a>"
         )
         row: str = f"<tr><td>👤 {login}</td><td>{issues_link}</td><td>{prs_link}</td></tr>"
         rows.append(row)
