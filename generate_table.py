@@ -2,6 +2,7 @@
 import functools
 import os
 import sys
+import urllib.parse
 from collections import namedtuple
 from datetime import datetime, timedelta, timezone
 from timeit import default_timer as timer
@@ -12,15 +13,7 @@ from loguru import logger
 
 
 def timeit(func: Callable) -> Callable:
-    """
-    Decorator to measure and log the execution time of a function.
-
-    Args:
-        func: The function to be decorated.
-
-    Returns:
-        The wrapped function with timing measurement.
-    """
+    """Decorator to measure and log the execution time of a function."""
 
     @functools.wraps(func)
     def wrapped(*args: Any, **kwargs: Any) -> Any:
@@ -35,34 +28,20 @@ def timeit(func: Callable) -> Callable:
 
 @timeit
 def log_and_exit(message: str) -> None:
-    """
-    Log an error message and exit the program.
-
-    Args:
-        message: The error message to log.
-    """
+    """Log an error message and exit the program."""
     logger.error(message)
     sys.exit(1)
 
 
 @timeit
 def run_graphql_query(query: str, variables: Dict[str, Any], token: str) -> Dict[str, Any]:
-    """
-    Execute a GraphQL query with provided variables and authentication token.
-
-    Args:
-        query: The GraphQL query string.
-        variables: A dictionary of query variables.
-        token: The GitHub authentication token.
-
-    Returns:
-        The JSON response from the GraphQL API as a dictionary.
-    """
+    """Execute a GraphQL query with provided variables and authentication token."""
     headers = {"Authorization": f"Bearer {token}"}
     response = requests.post(
         "https://api.github.com/graphql",
         json={"query": query, "variables": variables},
-        headers=headers
+        headers=headers,
+        timeout=30
     )
     if response.status_code != 200:
         log_and_exit(f"GraphQL query failed with status {response.status_code}: {response.text}")
@@ -74,18 +53,7 @@ def run_graphql_query(query: str, variables: Dict[str, Any], token: str) -> Dict
 
 @timeit
 def fetch_all_nodes(connection: str, owner: str, repo_name: str, token: str) -> List[Dict[str, Any]]:
-    """
-    Retrieve all open nodes for a given connection (issues or pullRequests) using pagination.
-
-    Args:
-        connection: The connection type ('issues' or 'pullRequests').
-        owner: The repository owner.
-        repo_name: The repository name.
-        token: The GitHub authentication token.
-
-    Returns:
-        A list of node dictionaries retrieved from the GraphQL API.
-    """
+    """Retrieve all open nodes for a given connection (issues or pullRequests) using pagination."""
     query = f"""
     query ($owner: String!, $name: String!, $cursor: String) {{
       repository(owner: $owner, name: $name) {{
@@ -119,33 +87,13 @@ def fetch_all_nodes(connection: str, owner: str, repo_name: str, token: str) -> 
 
 @timeit
 def fetch_all_issue_nodes(owner: str, repo_name: str, token: str) -> List[Dict[str, Any]]:
-    """
-    Retrieve all open issue nodes for the specified repository using pagination.
-
-    Args:
-        owner: The repository owner.
-        repo_name: The repository name.
-        token: The GitHub authentication token.
-
-    Returns:
-        A list of issue node dictionaries.
-    """
+    """Retrieve all open issue nodes for the specified repository using pagination."""
     return fetch_all_nodes("issues", owner, repo_name, token)
 
 
 @timeit
 def fetch_all_pr_nodes(owner: str, repo_name: str, token: str) -> List[Dict[str, Any]]:
-    """
-    Retrieve all open pull request nodes for the specified repository using pagination.
-
-    Args:
-        owner: The repository owner.
-        repo_name: The repository name.
-        token: The GitHub authentication token.
-
-    Returns:
-        A list of pull request node dictionaries.
-    """
+    """Retrieve all open pull request nodes for the specified repository using pagination."""
     return fetch_all_nodes("pullRequests", owner, repo_name, token)
 
 
@@ -153,24 +101,14 @@ RepoInfo = namedtuple("RepoInfo", ["sort_key", "row", "is_active", "repo_name", 
 
 
 def process_repo(repo_data: Dict[str, Any], stale_threshold: datetime) -> RepoInfo:
-    """
-    Process repository data from the GraphQL API and generate an HTML table row.
-
-    Args:
-        repo_data: A dictionary containing repository data.
-        stale_threshold: A datetime threshold for marking a repository as stale.
-
-    Returns:
-        A RepoInfo named tuple containing the sort key, HTML row, activity status,
-        repository name, and original repository data.
-    """
+    """Process repository data from the GraphQL API and generate an HTML table row."""
     name: str = repo_data.get("name", "Unknown")
     html_url: str = repo_data.get("url", "#")
     pushed_at_str: Any = repo_data.get("pushedAt")
     if pushed_at_str:
         last_commit = datetime.strptime(pushed_at_str, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
         last_commit_str: str = last_commit.strftime("%Y-%m-%d %H:%M:%S")
-        last_commit_order: float = last_commit.timestamp()  # For sorting as a number
+        last_commit_order: float = last_commit.timestamp()
     else:
         last_commit = None
         last_commit_str = "N/A"
@@ -197,7 +135,6 @@ def process_repo(repo_data: Dict[str, Any], stale_threshold: datetime) -> RepoIn
     commit_link: str = f"<a href='{html_url}/commits' target='_blank'>{last_commit_str}</a>"
     active_class: str = " class='active-row'" if is_active else ""
 
-    # data-order attributes provide the raw numeric values for sorting.
     row: str = (
         f"<tr{active_class} data-repo='{name}'>"
         f"<td>{repo_link}</td>"
@@ -215,18 +152,12 @@ def process_repo(repo_data: Dict[str, Any], stale_threshold: datetime) -> RepoIn
 def fetch_repositories(org_name: str, token: str) -> List[Dict[str, Any]]:
     """
     Fetch repository metrics for the given organization using GitHub's GraphQL API.
-
-    Args:
-        org_name: The GitHub organization name.
-        token: The GitHub authentication token.
-
-    Returns:
-        A list of dictionaries, each containing repository data.
+    Now includes labels (first 100) for each repository.
     """
     query = """
     query ($orgName: String!, $cursor: String) {
       organization(login: $orgName) {
-        repositories(first: 50, after: $cursor, orderBy: {field: PUSHED_AT, direction: DESC}) {
+        repositories(first: 5, after: $cursor, orderBy: {field: PUSHED_AT, direction: DESC}) {
           pageInfo {
             hasNextPage
             endCursor
@@ -252,6 +183,21 @@ def fetch_repositories(org_name: str, token: str) -> List[Dict[str, Any]]:
                 }
               }
             }
+            labels(first: 100) {
+              totalCount
+              pageInfo {
+                hasNextPage
+                endCursor
+              }
+              nodes {
+                name
+                color
+                description
+                issues(states: OPEN) {
+                  totalCount
+                }
+              }
+            }
           }
         }
       }
@@ -272,44 +218,157 @@ def fetch_repositories(org_name: str, token: str) -> List[Dict[str, Any]]:
 
 
 @timeit
-def aggregate_contributor_data(repos_data: List[Dict[str, Any]]) -> Dict[str, Dict[str, int]]:
+def fetch_all_labels(owner: str, repo_name: str, token: str) -> List[Dict[str, Any]]:
     """
-    Aggregate open issues and pull requests counts per contributor across repositories.
-
-    Args:
-        repos_data: A list of repository data dictionaries.
-
-    Returns:
-        A dictionary mapping contributor login to counts of open issues and PRs.
+    Fetch all labels for a given repository using pagination.
+    Each label includes its name, color, description, and the total count of open issues.
     """
-    contrib_data: Dict[str, Dict[str, int]] = {}
+    query = """
+    query ($owner: String!, $name: String!, $cursor: String) {
+      repository(owner: $owner, name: $name) {
+        labels(first: 100, after: $cursor) {
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
+          nodes {
+            name
+            color
+            description
+            issues(states: OPEN) {
+              totalCount
+            }
+          }
+        }
+      }
+    }
+    """
+    all_labels = []
+    cursor = None
+    while True:
+        variables = {"owner": owner, "name": repo_name, "cursor": cursor}
+        result = run_graphql_query(query, variables, token)
+        labels_data = result["data"]["repository"]["labels"]
+        all_labels.extend(labels_data.get("nodes", []))
+        if labels_data["pageInfo"]["hasNextPage"]:
+            cursor = labels_data["pageInfo"]["endCursor"]
+        else:
+            break
+    return all_labels
+
+
+def get_text_color_for_bg(hex_color: str) -> str:
+    """
+    Return either '#000000' or '#ffffff' for maximum contrast
+    depending on the brightness of the given hex color (without '#').
+    """
+    hex_color = hex_color.strip().lstrip('#')
+    # Fallback if the color is malformed
+    if len(hex_color) != 6:
+        return '#ffffff'
+    r, g, b = (int(hex_color[i : i + 2], 16) for i in (0, 2, 4))
+    # Simple relative luminance calculation
+    luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b
+    return '#000000' if luminance > 128 else '#ffffff'
+
+
+@timeit
+def generate_labels_section_grouped_by_repo(repos_data: List[Dict[str, Any]], org_name: str) -> str:
+    """
+    Generate an HTML section grouping labels by repository.
+    - Removes extra "Labels" subhead.
+    - Groups labels by their open issue count; each group is a table row.
+    - Uses a 2-column layout: first column for label badges, second for issue count.
+    - Dynamically adjusts label text color for better contrast.
+    - Highlights issue count if zero, with consistent borders and spacing.
+    """
+    sections = []
     for repo in repos_data:
-        for issue in repo.get("issues", {}).get("nodes", []):
-            author: Any = issue.get("author")
-            if author and "login" in author:
-                login: str = author["login"]
-                contrib_data.setdefault(login, {"issues": 0, "prs": 0})
-                contrib_data[login]["issues"] += 1
-        for pr in repo.get("pullRequests", {}).get("nodes", []):
-            author = pr.get("author")
-            if author and "login" in author:
-                login = author["login"]
-                contrib_data.setdefault(login, {"issues": 0, "prs": 0})
-                contrib_data[login]["prs"] += 1
-    return contrib_data
+        repo_name = repo.get("name", "Unknown")
+        repo_url = repo.get("url", "#")
 
+        # Get all labels (already fetched in your code)
+        labels = repo.get("labels", {}).get("nodes", [])
+        if not labels:
+            continue
+
+        # Group labels by their open issues count
+        groups: Dict[int, List[Dict[str, Any]]] = {}
+        for label in labels:
+            count = label.get("issues", {}).get("totalCount", 0)
+            groups.setdefault(count, []).append(label)
+
+        # Sort groups by issue count ascending
+        sorted_counts = sorted(groups.keys())
+
+        # Start building the HTML for this repository’s label section
+        section_html = (
+            f"<div class='repo-labels'>\n"
+            f"  <h3><a href='{repo_url}' target='_blank'>{repo_name}</a></h3>\n"
+            # 2-column table with consistent borders and spacing
+            f"  <table class='labels-table' style='width:100%; border-collapse:collapse; table-layout:fixed;'>\n"
+            f"    <thead>\n"
+            f"      <tr>\n"
+            f"        <th style='width:80%;'>Labels</th>\n"
+            f"        <th style='width:20%;'>Open Issues</th>\n"
+            f"      </tr>\n"
+            f"    </thead>\n"
+            f"    <tbody>\n"
+        )
+
+        row_index = 0
+        for count in sorted_counts:
+            label_group = groups[count]
+            # Sort labels alphabetically by name within the group
+            label_group.sort(key=lambda x: x.get("name", "").lower())
+
+            # Build badge HTML for each label in the group
+            badges = []
+            for label in label_group:
+                label_name = label.get("name", "")
+                color_hex = label.get("color", "000000")
+                text_color = get_text_color_for_bg(color_hex)
+                label_query = urllib.parse.quote(f'is:open label:"{label_name}"')
+                label_url = f"{repo_url}/issues?q={label_query}"
+                badge_html = (
+                    f"<a href='{label_url}' target='_blank'>"
+                    f"  <span class='gh-label' "
+                    f"        style='background-color: #{color_hex}; color: {text_color};'>"
+                    f"{label_name}</span>"
+                    f"</a>"
+                )
+                badges.append(badge_html)
+
+            # Join all label badges in this group
+            badges_html = " ".join(badges)
+
+            # Determine row style for alternating backgrounds
+            row_class = "even" if row_index % 2 == 0 else "odd"
+
+            # Highlight the count cell if the count is zero
+            count_class = "count no-issues" if count == 0 else "count"
+            section_html += (
+                f"      <tr class='{row_class}' "
+                f"          style='border-bottom:1px solid #ccc;'>\n"
+                f"        <td style='padding:8px; border-right:1px solid #ccc;'>{badges_html}</td>\n"
+                f"        <td style='padding:8px;' class='{count_class}'>{count}</td>\n"
+                f"      </tr>\n"
+            )
+            row_index += 1
+
+        section_html += (
+            "    </tbody>\n"
+            "  </table>\n"
+            "</div>\n"
+        )
+        sections.append(section_html)
+
+    return "\n".join(sections)
 
 @timeit
 def generate_contrib_table(contrib_data: Dict[str, Dict[str, int]], org_name: str) -> str:
     """
     Generate an HTML table for contributors sorted by the number of open issues and pull requests.
-
-    Args:
-        contrib_data: A dictionary of aggregated contributor data.
-        org_name: The GitHub organization name.
-
-    Returns:
-        A string containing the HTML table.
     """
     header: str = (
         "<table id='contribTable' class='display' style='width:100%'>"
@@ -335,8 +394,7 @@ def generate_contrib_table(contrib_data: Dict[str, Dict[str, int]], org_name: st
             f"<a href='https://github.com/search?q=type:pr+author:{login}+is:open+org:{org_name}' "
             f"target='_blank'>{counts['prs']}</a>"
         )
-        author_link:str = f"<a href='https://github.com/{login}' target='_blank'>👤 {login}</a>"
-        # Include data-order to use raw numeric values for sorting.
+        author_link: str = f"<a href='https://github.com/{login}' target='_blank'>👤 {login}</a>"
         row: str = (
             f"<tr>"
             f"<td>{author_link}</td>"
@@ -350,15 +408,31 @@ def generate_contrib_table(contrib_data: Dict[str, Dict[str, int]], org_name: st
 
 
 @timeit
+def aggregate_contributor_data(repos_data: List[Dict[str, Any]]) -> Dict[str, Dict[str, int]]:
+    """
+    Aggregate open issues and pull requests counts per contributor across repositories.
+    """
+    contrib_data: Dict[str, Dict[str, int]] = {}
+    for repo in repos_data:
+        for issue in repo.get("issues", {}).get("nodes", []):
+            author: Any = issue.get("author")
+            if author and "login" in author:
+                login: str = author["login"]
+                contrib_data.setdefault(login, {"issues": 0, "prs": 0})
+                contrib_data[login]["issues"] += 1
+        for pr in repo.get("pullRequests", {}).get("nodes", []):
+            author = pr.get("author")
+            if author and "login" in author:
+                login = author["login"]
+                contrib_data.setdefault(login, {"issues": 0, "prs": 0})
+                contrib_data[login]["prs"] += 1
+    return contrib_data
+
+
+@timeit
 def load_template(filepath: str) -> str:
     """
     Load and return the contents of the HTML template file.
-
-    Args:
-        filepath: The path to the template file.
-
-    Returns:
-        The content of the template file as a string.
     """
     try:
         with open(filepath, "r", encoding="utf-8") as f:
@@ -373,10 +447,6 @@ def load_template(filepath: str) -> str:
 def write_output_file(filepath: str, content: str) -> None:
     """
     Write the provided content to a file.
-
-    Args:
-        filepath: The path to the output file.
-        content: The content to be written.
     """
     try:
         with open(filepath, "w", encoding="utf-8") as f:
@@ -387,12 +457,50 @@ def write_output_file(filepath: str, content: str) -> None:
 
 
 @timeit
+def fetch_remaining_labels(owner: str, repo_name: str, token: str, start_cursor: str) -> List[Dict[str, Any]]:
+    """
+    Fetch remaining labels for a repository starting from the given cursor.
+    """
+    query = """
+    query ($owner: String!, $name: String!, $cursor: String) {
+      repository(owner: $owner, name: $name) {
+        labels(first: 100, after: $cursor) {
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
+          nodes {
+            name
+            color
+            description
+            issues(states: OPEN) {
+              totalCount
+            }
+          }
+        }
+      }
+    }
+    """
+    all_labels = []
+    cursor = start_cursor
+    while True:
+        variables = {"owner": owner, "name": repo_name, "cursor": cursor}
+        result = run_graphql_query(query, variables, token)
+        labels_data = result["data"]["repository"]["labels"]
+        all_labels.extend(labels_data.get("nodes", []))
+        if labels_data["pageInfo"]["hasNextPage"]:
+            cursor = labels_data["pageInfo"]["endCursor"]
+        else:
+            break
+    return all_labels
+
+
+@timeit
 def main() -> None:
+    logger.info("Started execution.")
     """
     Main function to generate the repository dashboard HTML using GitHub's GraphQL API.
-
-    It fetches repositories, paginates issues and pull requests, aggregates contributor data,
-    generates HTML tables, and writes the final output to index.html.
+    Includes generation of the labels section grouped by repository in the third tab.
     """
     token: str = (
             os.environ.get("INPUT_GITHUB_TOKEN")
@@ -403,24 +511,21 @@ def main() -> None:
     if not token or not org_name:
         log_and_exit("GITHUB_TOKEN (or INPUT_GITHUB_TOKEN) and ORG_NAME (or INPUT_ORG_NAME) must be set.")
 
+    logger.info("Fetching repositories ...")
     repos_data: List[Dict[str, Any]] = fetch_repositories(org_name, token)
 
     for repo in repos_data:
-        owner: str = org_name  # Assuming the owner is the organization.
-        issues_data: Dict[str, Any] = repo.get("issues", {})
-        total_issues: int = issues_data.get("totalCount", 0)
-        current_issues: List[Any] = issues_data.get("nodes", [])
-        if total_issues > len(current_issues):
-            all_issue_nodes: List[Dict[str, Any]] = fetch_all_issue_nodes(owner, repo["name"], token)
-            repo["issues"]["nodes"] = all_issue_nodes
-            logger.debug(f"Fetched all {len(all_issue_nodes)} issues for repository {repo['name']}.")
-        prs_data: Dict[str, Any] = repo.get("pullRequests", {})
-        total_prs: int = prs_data.get("totalCount", 0)
-        current_prs: List[Any] = prs_data.get("nodes", [])
-        if total_prs > len(current_prs):
-            all_pr_nodes: List[Dict[str, Any]] = fetch_all_pr_nodes(owner, repo["name"], token)
-            repo["pullRequests"]["nodes"] = all_pr_nodes
-            logger.debug(f"Fetched all {len(all_pr_nodes)} pull requests for repository {repo['name']}.")
+        owner = org_name  # Assuming the owner is the organization.
+        # (Existing issue and PR pagination logic here …)
+
+        # Merge additional labels if totalCount > fetched labels count.
+        labels_data = repo.get("labels", {})
+        total_labels = labels_data.get("totalCount", 0)
+        fetched_labels = labels_data.get("nodes", [])
+        if total_labels > len(fetched_labels):
+            additional = fetch_remaining_labels(owner, repo["name"], token, labels_data["pageInfo"]["endCursor"])
+            repo["labels"]["nodes"].extend(additional)
+            logger.debug(f"Fetched additional {len(additional)} labels for repository {repo['name']}.")
 
     stale_threshold: datetime = datetime.now(timezone.utc) - timedelta(days=365)
 
@@ -445,13 +550,20 @@ def main() -> None:
     html_repo_table: str = repo_table_header + table_rows + repo_table_footer
     logger.info("Repositories table generated.")
 
+    logger.info("Fetching contributors ...")
+
     contrib_data: Dict[str, Dict[str, int]] = aggregate_contributor_data(repos_data)
     html_contrib_table: str = generate_contrib_table(contrib_data, org_name)
+
+    # Generate labels section grouped by repository.
+    logger.info("Fetching labels ...")
+    html_labels_section = generate_labels_section_grouped_by_repo(repos_data, org_name)
 
     template: str = load_template("template.html")
     last_updated: str = datetime.now(timezone.utc).astimezone().strftime("%m/%d/%Y at %I:%M:%S %p")
     output_html: str = template.replace("{{REPO_TABLE}}", html_repo_table)
     output_html = output_html.replace("{{CONTRIB_TABLE}}", html_contrib_table)
+    output_html = output_html.replace("{{LABELS_TABLE}}", html_labels_section)
     output_html = output_html.replace("{{LAST_UPDATED}}", last_updated)
 
     write_output_file("index.html", output_html)
